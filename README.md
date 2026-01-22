@@ -127,13 +127,26 @@ vehicle-counter-phase1/
 
 ## 🔧 Configuration
 
+### Model Selection
+- **YOLOv8n** (Nano): Fastest, least accurate
+- **YOLOv8s** (Small): Fast, good accuracy
+- **YOLOv8m** (Medium): **Recommended** - Best balance ⭐
+- **YOLOv8l** (Large): Slower, very accurate
+- **YOLOv8x** (Extra Large): Slowest, most accurate
+
+Select model before initialization. YOLOv8m recommended for best motorcycle detection.
+
 ### Counting Line
-- Default: Horizontal line at y=300 pixels
-- Can be modified in future phases for interactive configuration
+- Configurable via sliders in UI
+- Vertical position (Y): 10-90% of frame height
+- Horizontal start/end (X): 0-100% of frame width
+- Real-time updates during video processing
 
 ### Detection Settings
 - Vehicle classes: car, motorcycle, bus, truck
-- Confidence threshold: 0.5 (configurable in detector.py)
+- **Confidence threshold**: 0.1-0.9 (default: 0.3 for better motorcycle detection)
+- **Detection interval**: 1-5 frames (default: 1 for best accuracy)
+- **Resolution**: 640x480, 800x600, 1280x720 (default: 800x600)
 - Tracking parameters: Configurable in tracker.py
 
 ## 📊 Output Format

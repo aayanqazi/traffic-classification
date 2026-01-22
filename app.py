@@ -50,16 +50,36 @@ class VideoProcessor:
         self.status_message = ""
         self.processing_complete = False
 
-    def initialize_components(self):
+        # Thread-safe line position settings (accessible from background thread)
+        self.line_y_position = 50  # Default: 50% from top
+        self.line_start_x = 10  # Default: 10% from left
+        self.line_end_x = 90  # Default: 90% from left
+
+    def initialize_components(self, confidence_threshold=0.3, model_name='yolov8s.pt'):
         """Initialize detection, tracking, and counting components."""
         try:
-            self.detector = VehicleDetector()
+            logger.info(f"Initializing with model: {model_name}, confidence: {confidence_threshold}")
+            self.detector = VehicleDetector(model_path=model_name, confidence_threshold=confidence_threshold)
             self.tracker = VehicleTracker()
             self.counter = VehicleCounter()
-            st.success("✅ Components initialized successfully")
+            self.confidence_threshold = confidence_threshold
+            
+            # Speed recommendation based on model
+            if 'n.pt' in model_name:
+                speed_note = "⚡ Very fast model selected"
+            elif 's.pt' in model_name:
+                speed_note = "⚡ Good balance of speed and accuracy"
+            elif 'm.pt' in model_name:
+                speed_note = "⚠️ Slower model - increase detection interval for speed"
+            else:
+                speed_note = "⚠️ Very slow model - expect reduced FPS"
+            
+            st.success(f"✅ Components initialized with {model_name}")
+            st.info(speed_note)
             return True
         except Exception as e:
             st.error(f"❌ Failed to initialize components: {e}")
+            logger.error(f"Initialization failed: {e}")
             return False
 
     def process_video(self, video_path: str):
@@ -111,27 +131,16 @@ class VideoProcessor:
                 # Track vehicles (every frame for smooth tracking)
                 tracked_objects = self.tracker.update(detections, frame.shape[:2])
 
-                # Update counting line position based on user settings or auto-center
-                line_y = getattr(st.session_state, 'line_y_position', None)
-                line_start_x = getattr(st.session_state, 'line_start_x', None)
-                line_end_x = getattr(st.session_state, 'line_end_x', None)
-                
-                # Convert percentage to actual values if set
-                if line_y is not None:
-                    line_y_percent = line_y
-                else:
-                    line_y_percent = None
-                
-                if line_start_x is not None:
-                    line_start_x_percent = line_start_x
-                else:
-                    line_start_x_percent = None
-                
-                if line_end_x is not None:
-                    line_end_x_percent = line_end_x
-                else:
-                    line_end_x_percent = None
-                
+                # Update counting line position based on user settings
+                # Read from thread-safe instance variables (updated by UI in main thread)
+                line_y_percent = self.line_y_position
+                line_start_x_percent = self.line_start_x
+                line_end_x_percent = self.line_end_x
+
+                # Debug: Log line position values every 30 frames to avoid spam
+                if processed_count % 30 == 0:
+                    logger.debug(f"Using line position: Y={line_y_percent}%, X={line_start_x_percent}%-{line_end_x_percent}%")
+
                 # Update counting line position (must be before update_counts)
                 frame = self.counter.draw_counting_line(
                     frame,
@@ -257,12 +266,48 @@ def main():
     # Sidebar controls
     st.sidebar.header("🎛️ Controls")
 
+    # Model selection
+    st.sidebar.header("🤖 Model Selection")
+    model_options = {
+        "YOLOv8n (Nano - Fastest)": "yolov8n.pt",
+        "YOLOv8s (Small - Recommended) ⭐": "yolov8s.pt",
+        "YOLOv8m (Medium - Slower)": "yolov8m.pt",
+        "YOLOv8l (Large - Very Slow)": "yolov8l.pt",
+        "YOLOv8x (Extra Large - Slowest)": "yolov8x.pt"
+    }
+    
+    selected_model = st.sidebar.selectbox(
+        "Select YOLO Model",
+        options=list(model_options.keys()),
+        index=1,  # Default to YOLOv8s (better speed/accuracy balance)
+        help="Larger models = better accuracy but MUCH slower. YOLOv8s recommended for best balance."
+    )
+    model_file = model_options[selected_model]
+    
+    st.sidebar.caption("💡 **Speed tip**: YOLOv8s is 2x faster than YOLOv8m with good accuracy")
+    st.sidebar.caption("⚠️ First use will download the selected model (~6-52 MB)")
+
+    # Detection threshold
+    st.sidebar.header("🎯 Detection Settings")
+    confidence_threshold = st.sidebar.slider(
+        "Confidence Threshold",
+        min_value=0.1,
+        max_value=0.9,
+        value=0.3,
+        step=0.05,
+        help="Lower threshold = detect more objects (including small motorcycles). Higher = only high-confidence detections."
+    )
+    st.sidebar.caption("💡 **Tip**: Use 0.3-0.4 for better motorcycle detection")
+
     # Initialize button
     if st.sidebar.button("🔧 Initialize Components", type="primary"):
-        if processor.initialize_components():
-            st.session_state.initialized = True
-        else:
-            st.session_state.initialized = False
+        with st.spinner(f"Initializing {selected_model}..."):
+            if processor.initialize_components(confidence_threshold=confidence_threshold, model_name=model_file):
+                st.session_state.initialized = True
+                st.session_state.confidence_threshold = confidence_threshold
+                st.session_state.model_name = model_file
+            else:
+                st.session_state.initialized = False
 
     # Video input options
     st.sidebar.header("📹 Video Input")
@@ -356,18 +401,50 @@ def main():
     # Performance settings
     st.sidebar.header("⚡ Performance")
     if st.session_state.get('initialized', False):
+        # Show current model info
+        current_model = st.session_state.get('model_name', 'yolov8s.pt')
+        st.sidebar.info(f"🤖 Model: {current_model}")
+        st.sidebar.caption(f"🎯 Confidence: {st.session_state.get('confidence_threshold', 0.3):.2f}")
+        st.sidebar.caption("💡 Re-initialize to change model or confidence")
+        
+        st.sidebar.markdown("---")
+        
+        # Speed presets
+        speed_preset = st.sidebar.radio(
+            "⚡ Speed Preset",
+            options=["Balanced ⭐", "Fast", "Quality"],
+            index=0,
+            help="Quick presets for common scenarios"
+        )
+        
+        if speed_preset == "Fast":
+            default_interval = 3
+            default_resolution = 0  # 640x480
+            st.sidebar.caption("🚀 Optimized for speed (~2-3x faster)")
+        elif speed_preset == "Quality":
+            default_interval = 1
+            default_resolution = 2  # 1280x720
+            st.sidebar.caption("🎯 Optimized for accuracy (slower)")
+        else:  # Balanced
+            default_interval = 2
+            default_resolution = 1  # 800x600
+            st.sidebar.caption("⚖️ Good balance of speed and accuracy")
+        
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Advanced Settings**")
+        
         detection_interval = st.sidebar.slider(
             "Detection Interval",
             min_value=1,
             max_value=5,
-            value=2,
+            value=default_interval,
             help="Detect vehicles every N frames (higher = faster, lower accuracy)"
         )
         
         max_resolution = st.sidebar.selectbox(
             "Max Resolution",
             options=["640x480 (Fast)", "800x600 (Balanced)", "1280x720 (Quality)"],
-            index=0,
+            index=default_resolution,
             help="Lower resolution = faster processing"
         )
         
@@ -379,6 +456,28 @@ def main():
             "1280x720 (Quality)": (1280, 720)
         }
         st.session_state.max_resolution = resolution_map[max_resolution]
+        
+        # Show estimated FPS based on settings
+        current_model_file = st.session_state.get('model_name', 'yolov8s.pt')
+        if 'n.pt' in current_model_file:
+            base_fps = 15
+        elif 's.pt' in current_model_file:
+            base_fps = 10
+        elif 'm.pt' in current_model_file:
+            base_fps = 6
+        elif 'l.pt' in current_model_file:
+            base_fps = 3
+        else:
+            base_fps = 2
+        
+        # Adjust based on settings
+        estimated_fps = base_fps * detection_interval
+        if default_resolution == 0:  # 640x480
+            estimated_fps *= 1.3
+        elif default_resolution == 2:  # 1280x720
+            estimated_fps *= 0.7
+        
+        st.sidebar.caption(f"📊 Estimated FPS: ~{int(estimated_fps)} fps")
 
     # Counting line configuration
     st.sidebar.header("📏 Counting Line")
@@ -396,15 +495,29 @@ def main():
         # Line position controls
         st.sidebar.markdown("**Line Position (as % of frame)**")
         st.sidebar.markdown("*Adjust sliders to position the yellow counting line*")
-        
+
+        def update_line_y():
+            st.session_state.line_y_position = st.session_state.line_y_slider
+            processor.line_y_position = st.session_state.line_y_slider
+
         line_y = st.sidebar.slider(
             "Vertical Position (Y)",
             min_value=10,
             max_value=90,
             value=st.session_state.line_y_position,
+            key="line_y_slider",
+            on_change=update_line_y,
             help="Vertical position of counting line (50% = center, lower = top, higher = bottom)"
         )
-        
+
+        def update_line_start_x():
+            st.session_state.line_start_x = st.session_state.line_start_x_slider
+            processor.line_start_x = st.session_state.line_start_x_slider
+
+        def update_line_end_x():
+            st.session_state.line_end_x = st.session_state.line_end_x_slider
+            processor.line_end_x = st.session_state.line_end_x_slider
+
         col_x1, col_x2 = st.sidebar.columns(2)
         with col_x1:
             line_start_x = st.sidebar.slider(
@@ -412,6 +525,8 @@ def main():
                 min_value=0,
                 max_value=80,
                 value=st.session_state.line_start_x,
+                key="line_start_x_slider",
+                on_change=update_line_start_x,
                 help="Left edge of line"
             )
         with col_x2:
@@ -420,6 +535,8 @@ def main():
                 min_value=20,
                 max_value=100,
                 value=st.session_state.line_end_x,
+                key="line_end_x_slider",
+                on_change=update_line_end_x,
                 help="Right edge of line"
             )
         
@@ -428,10 +545,10 @@ def main():
             line_end_x = line_start_x + 10
             st.sidebar.warning("⚠️ End X must be greater than Start X")
         
-        # Store in session state (updates automatically)
-        st.session_state.line_y_position = line_y
-        st.session_state.line_start_x = line_start_x
-        st.session_state.line_end_x = line_end_x
+        # Sync processor instance variables with current slider values (for thread access)
+        processor.line_y_position = line_y
+        processor.line_start_x = line_start_x
+        processor.line_end_x = line_end_x
         
         # Show current position
         st.sidebar.info(f"📍 Line: Y={line_y}%, X={line_start_x}%-{line_end_x}%")
@@ -448,6 +565,9 @@ def main():
             st.session_state.line_y_position = 50
             st.session_state.line_start_x = 10
             st.session_state.line_end_x = 90
+            processor.line_y_position = 50
+            processor.line_start_x = 10
+            processor.line_end_x = 90
             st.session_state.line_applied = True
             st.sidebar.success("Line reset to center")
 
