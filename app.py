@@ -55,7 +55,7 @@ class VideoProcessor:
         self.line_start_x = 10  # Default: 10% from left
         self.line_end_x = 90  # Default: 90% from left
 
-    def initialize_components(self, confidence_threshold=0.3, model_name='yolov8s.pt'):
+    def initialize_components(self, confidence_threshold=0.3, model_name='yolo26s.pt'):
         """Initialize detection, tracking, and counting components."""
         try:
             logger.info(f"Initializing with model: {model_name}, confidence: {confidence_threshold}")
@@ -65,8 +65,12 @@ class VideoProcessor:
             self.confidence_threshold = confidence_threshold
             
             # Speed recommendation based on model
-            if 'n.pt' in model_name:
-                speed_note = "⚡ Very fast model selected"
+            if 'yolo26' in model_name.lower():
+                speed_note = "✨ YOLO26 - Latest model! 43% faster CPU inference + better motorcycle detection"
+            elif 'yolo12' in model_name.lower():
+                speed_note = "⚡ YOLOv12 - Attention-based architecture, good accuracy"
+            elif 'n.pt' in model_name:
+                speed_note = "⚡ Very fast nano model"
             elif 's.pt' in model_name:
                 speed_note = "⚡ Good balance of speed and accuracy"
             elif 'm.pt' in model_name:
@@ -269,23 +273,33 @@ def main():
     # Model selection
     st.sidebar.header("🤖 Model Selection")
     model_options = {
-        "YOLOv8n (Nano - Fastest)": "yolov8n.pt",
-        "YOLOv8s (Small - Recommended) ⭐": "yolov8s.pt",
-        "YOLOv8m (Medium - Slower)": "yolov8m.pt",
-        "YOLOv8l (Large - Very Slow)": "yolov8l.pt",
-        "YOLOv8x (Extra Large - Slowest)": "yolov8x.pt"
+        # YOLO26 Models (Latest - January 2026) - RECOMMENDED
+        "YOLO26n (Nano - Fastest) ⚡⚡⚡": "yolo26n.pt",
+        "YOLO26s (Small - Recommended) ⭐": "yolo26s.pt",
+        "YOLO26m (Medium - Balanced)": "yolo26m.pt",
+        "YOLO26l (Large - Accurate)": "yolo26l.pt",
+        
+        # YOLOv12 Models (Alternative - Feb 2025)
+        "YOLOv12n (Nano - Fast)": "yolo12n.pt",
+        "YOLOv12s (Small - Good)": "yolo12s.pt",
+        "YOLOv12m (Medium - Better)": "yolo12m.pt",
+        
+        # Legacy YOLOv8 Models (Outdated)
+        "YOLOv8n (Legacy)": "yolov8n.pt",
+        "YOLOv8s (Legacy)": "yolov8s.pt",
+        "YOLOv8m (Legacy - Slow)": "yolov8m.pt",
     }
     
     selected_model = st.sidebar.selectbox(
         "Select YOLO Model",
         options=list(model_options.keys()),
-        index=1,  # Default to YOLOv8s (better speed/accuracy balance)
-        help="Larger models = better accuracy but MUCH slower. YOLOv8s recommended for best balance."
+        index=1,  # Default to YOLO26s
+        help="YOLO26 is 43% faster with better accuracy! Released Jan 2026."
     )
     model_file = model_options[selected_model]
     
-    st.sidebar.caption("💡 **Speed tip**: YOLOv8s is 2x faster than YOLOv8m with good accuracy")
-    st.sidebar.caption("⚠️ First use will download the selected model (~6-52 MB)")
+    st.sidebar.caption("✨ **NEW**: YOLO26 - 43% faster CPU inference + better small object detection")
+    st.sidebar.caption("⚠️ First use will download the selected model (~10-50 MB)")
 
     # Detection threshold
     st.sidebar.header("🎯 Detection Settings")
@@ -458,8 +472,34 @@ def main():
         st.session_state.max_resolution = resolution_map[max_resolution]
         
         # Show estimated FPS based on settings
-        current_model_file = st.session_state.get('model_name', 'yolov8s.pt')
-        if 'n.pt' in current_model_file:
+        current_model_file = st.session_state.get('model_name', 'yolo26s.pt')
+        
+        # YOLO26 models (fastest - 43% faster than previous)
+        if 'yolo26n' in current_model_file:
+            base_fps = 25  # Very fast!
+        elif 'yolo26s' in current_model_file:
+            base_fps = 18  # Fast
+        elif 'yolo26m' in current_model_file:
+            base_fps = 12  # Balanced
+        elif 'yolo26l' in current_model_file:
+            base_fps = 8   # Accurate
+        
+        # YOLOv12 models (attention-based)
+        elif 'yolo12n' in current_model_file:
+            base_fps = 20
+        elif 'yolo12s' in current_model_file:
+            base_fps = 15
+        elif 'yolo12m' in current_model_file:
+            base_fps = 10
+        
+        # Legacy YOLOv8 models
+        elif 'yolov8n' in current_model_file or 'v8n' in current_model_file:
+            base_fps = 15
+        elif 'yolov8s' in current_model_file or 'v8s' in current_model_file:
+            base_fps = 10
+        elif 'yolov8m' in current_model_file or 'v8m' in current_model_file:
+            base_fps = 6
+        elif 'n.pt' in current_model_file:
             base_fps = 15
         elif 's.pt' in current_model_file:
             base_fps = 10
